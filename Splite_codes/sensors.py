@@ -2,6 +2,10 @@ import RPi.GPIO as GPIO
 import time
 import math
 
+# GPIO base setup
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+
 # Pins (defined and set up here)
 TRIG1, ECHO1 = 17, 27   # Glass
 TRIG2, ECHO2 = 22, 23   # General Trash
