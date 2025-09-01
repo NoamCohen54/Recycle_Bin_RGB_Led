@@ -2,24 +2,27 @@ import RPi.GPIO as GPIO
 import time
 import math
 
-# These are set by main.py after import
-TRIG1 = None
-ECHO1 = None
-TRIG2 = None
-ECHO2 = None
+# Pins (defined and set up here)
+TRIG1, ECHO1 = 17, 27   # Glass
+TRIG2, ECHO2 = 22, 23   # General Trash
+
 user_max_distance_m = 6.0
 SPEED_OF_SOUND_M_S = 343.0
 SPEED_OF_SOUND_CM_S = SPEED_OF_SOUND_M_S * 100.0
 TRIGGER_PULSE_US = 10
 SENSOR_MAX_CM_PRACTICAL = 400.0
 
-# Return a safe round-trip echo timeout (seconds) for a given max distance
+# GPIO setup for sensors
+GPIO.setup(TRIG1, GPIO.OUT); GPIO.output(TRIG1, False)
+GPIO.setup(ECHO1, GPIO.IN)
+GPIO.setup(TRIG2, GPIO.OUT); GPIO.output(TRIG2, False)
+GPIO.setup(ECHO2, GPIO.IN)
+
 def timeout_for_max_distance(max_distance_m: float) -> float:
     """Compute echo timeout based on desired max distance."""
     t = (2.0 * max_distance_m) / SPEED_OF_SOUND_M_S
     return t * 1.25
 
-# Wait until ECHO pin reaches level or timeout
 def _wait_for(echo_pin: int, level: int, timeout_s: float) -> bool:
     """Wait for echo pin to reach the desired level or timeout."""
     start = time.perf_counter()
@@ -28,7 +31,6 @@ def _wait_for(echo_pin: int, level: int, timeout_s: float) -> bool:
             return False
     return True
 
-# Trigger HC-SR04 and return distance in cm (NaN on timeout)
 def measure_distance_cm(trig_pin: int, echo_pin: int, edge_timeout_s: float) -> float:
     """Send trigger pulse and measure round-trip echo in cm."""
     GPIO.output(trig_pin, False)
@@ -46,7 +48,6 @@ def measure_distance_cm(trig_pin: int, echo_pin: int, edge_timeout_s: float) -> 
 
     return (t_end - t_start) * SPEED_OF_SOUND_CM_S / 2.0
 
-# Retry several times; return first valid distance or NaN
 def measure_with_retry(trig_pin: int, echo_pin: int, max_distance_m: float, retries: int = 1) -> float:
     """Try multiple reads; return first non-NaN distance."""
     edge_timeout = timeout_for_max_distance(max_distance_m)
@@ -56,7 +57,6 @@ def measure_with_retry(trig_pin: int, echo_pin: int, max_distance_m: float, retr
             return d
     return math.nan
 
-# Print distance in a readable format
 def print_distance(label: str, d: float):
     """Print distance with basic range checks."""
     if math.isnan(d):
@@ -68,13 +68,12 @@ def print_distance(label: str, d: float):
     else:
         print(f"{label}: {d:.2f} cm")
 
-# Block until the specific sensor reads > 20cm (or timeout loop ends)
 def measure_dist(dist_sensor: int) -> float:
     """Continuously read the sensor until distance > 20cm."""
     if dist_sensor == 1:
-        trig, echo, label = TRIG1, ECHO1, "Sensor1"
+        trig, echo, label = TRIG1, ECHO1, "Glass"
     elif dist_sensor == 2:
-        trig, echo, label = TRIG2, ECHO2, "Sensor2"
+        trig, echo, label = TRIG2, ECHO2, "General Trash"
     else:
         raise ValueError("dist_sensor must be 1 or 2")
 

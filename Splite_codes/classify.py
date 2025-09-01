@@ -58,10 +58,10 @@ def predict(my_led):
             return None
     
     print("\n♻️ Waste classification by Gemini:", predicted_label)
-    print(f"\nAI Prediction:\n      {predicted_label}")
+  # print(f"\nAI Prediction:\n      {predicted_label}")
     
-    cloudinary.api.update(public_id=latest_image["public_id"], folder=predicted_label)
-    print(f"\nImage moved to Cloudinary folder: {predicted_label}")
+    cloudinary.api.update(public_id=latest_image["public_id"], folder=category)
+    print(f"\nImage moved to Cloudinary folder: {category}")
     time.sleep(10)
     my_led.off()
     return predicted_label
