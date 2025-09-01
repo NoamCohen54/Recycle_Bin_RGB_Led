@@ -15,8 +15,8 @@ import sensors
 import classify
 
 # ---- GPIO base setup ----
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setwarnings(False)
 
 # ---- LED & Button ----
 my_led = RGBLED(13, 19, 26, active_high=False)
