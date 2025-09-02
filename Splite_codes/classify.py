@@ -3,6 +3,7 @@ import requests
 from PIL import Image
 from io import BytesIO
 import cloudinary
+import cloudinary.api
 import google.generativeai as genai
 
 # Fetch latest image from Cloudinary, classify it, set LED, and move to folder
