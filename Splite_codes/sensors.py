@@ -72,8 +72,44 @@ def print_distance(label: str, d: float):
     else:
         print(f"{label}: {d:.2f} cm")
 
+def wait_until_clear(trig, echo, label, timeout=30, min_clear_cm=20.0):
+    """Measure once, print status, then silently wait until clear (>min_clear_cm) or timeout."""
+    start_t = time.time()
+
+    # First measurement
+    d = measure_with_retry(trig, echo, user_max_distance_m, retries=1)
+
+    # Print based on first measurement
+    if math.isnan(d):
+        print(f"{label}: Timeout (no valid reading)")
+    elif d < 15.0:
+        print(f"{label}: {d:.2f} cm → Bin is full, needs emptying")
+    elif d > min_clear_cm:
+        print(f"{label}: {d:.2f} cm → Bin is empty")
+        return d
+    else:
+        print(f"{label}: {d:.2f} cm → Still blocked")
+
+    # Silent loop until clear or timeout
+    while (math.isnan(d)) or (d <= min_clear_cm):
+        if time.time() - start_t > timeout:
+            break
+        time.sleep(0.5)
+        d = measure_with_retry(trig, echo, user_max_distance_m, retries=1)
+
+    # Final print after loop
+    if math.isnan(d):
+        print(f"{label}: Timeout (no valid reading after waiting)")
+    elif d > min_clear_cm:
+        print(f"{label}: {d:.2f} cm → Bin is now empty")
+    else:
+        print(f"{label}: {d:.2f} cm → Bin still blocked")
+
+    return d
+
+
 def measure_dist(dist_sensor: int) -> float:
-    """Continuously read the sensor until distance > 20cm."""
+    """Block until specific bin sensor is clear (>20cm) or timeout."""
     if dist_sensor == 1:
         trig, echo, label = TRIG1, ECHO1, "Glass"
     elif dist_sensor == 2:
@@ -81,22 +117,5 @@ def measure_dist(dist_sensor: int) -> float:
     else:
         raise ValueError("dist_sensor must be 1 or 2")
 
-    d = measure_with_retry(trig, echo, user_max_distance_m, retries=1)
+    return wait_until_clear(trig, echo, label)
 
-    if not math.isnan(d) and d < 15.0:
-        print("need to make the trash empty")
-
-    start_t = time.time()
-    while (math.isnan(d)) or (d <= 20.0):
-        if not math.isnan(d):
-            print(f"{label}: {d:.2f} cm (waiting for empty bin…)")
-        time.sleep(0.5)
-        d = measure_with_retry(trig, echo, user_max_distance_m, retries=1)
-        if not math.isnan(d) and d < 15.0:
-            print("need to make the trash empty")
-        if time.time() - start_t > 30:
-            break
-
-    if not math.isnan(d) and d > 20.0:
-        print(f"{label}: {d:.2f} cm (bin considered empty)")
-    return d
