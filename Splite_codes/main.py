@@ -1,4 +1,3 @@
-# ===================== Importing Libraries =====================
 import os
 import time
 import requests
@@ -13,145 +12,126 @@ import cloudinary.api
 import google.generativeai as genai
 import RPi.GPIO as GPIO
 
-# ===================== Setup =====================
-# Load .env file with API keys
-load_dotenv("API_KEY.env")
+# ========== Setup ==========
 
+# Load API keys from .env file
+load_dotenv("API_KEY.env")
 cloudinary.config(
     cloud_name="dgyy6izrp",
     api_key=os.getenv("CLOUD_API_KEY"),
     api_secret=os.getenv("CLOUD_SECRET_KEY"),
     secure=True
 )
-
 genai.configure(api_key=os.getenv("Gemini_API_KEY"))
 
-# GPIO setup
+# GPIO devices
 button = Button(2)
 led = RGBLED(13, 19, 26, active_high=False)
 
-# RGB color mapping (all lowercase for safety)
+# Category to RGB color mapping (use lowercase keys for consistency)
 colors = {
-    "glass": (1, 0, 1),            # Purple
-    "paper/cardboard": (0, 0, 1), # Blue
-    "general trash": (0, 1, 0)    # Green
+    "glass": (1, 0, 1),              # Purple
+    "paper or cardboard": (0, 0, 1), # Blue
+    "general trash": (0, 1, 0)       # Green
 }
 
-# ===================== Functions =====================
+# ========== Functions ==========
 
 def take_picture():
-    """Capture image from Pi Camera and upload to Cloudinary."""
+    """Capture image using PiCamera and return as BytesIO object"""
     print("📸 Starting camera...")
     picam2 = Picamera2()
-    picam2.start_preview(Preview.QT)  # use Preview.NULL on headless systems
+    picam2.start_preview(Preview.QT)
     picam2.start()
-    time.sleep(5)
-
-    # Capture to buffer
+    time.sleep(10)
     image_array = picam2.capture_array()
+    picam2.stop_preview()
+    picam2.close()
+
     image_pil = Image.fromarray(image_array)
     buffer = BytesIO()
     image_pil.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
+    return buffer
 
-    picam2.stop_preview()
-    picam2.close()
+def predict_category(image_buffer):
+    """Send image to Gemini model and return predicted category"""
+    image = Image.open(image_buffer).convert("RGB")
 
-    # ✅ תיקון: העלאה לתיקייה בשם הנכון "captured" (ולא captuerd)
-    cloudinary.uploader.upload(buffer, folder="captured")
-
-    print("✅ Image captured and uploaded")
-
-def set_led_color(category):
-    category = category.lower().strip()
-    color = colors.get(category)
-    if color:
-        led.color = color
-    else:
-        led.color = (1, 0, 0)  # RED for unknown
-        print(f"⚠️ Unknown category → RED")
-    time.sleep(10)
-    led.off()
-
-def classify():
-    """Get latest uploaded image from 'captured', predict category, set LED, and move image to correct folder."""
-    
-    # ✅ תיקון: חיפוש בתיקייה הנכונה (captured)
-    resources = cloudinary.api.resources(
-        type="upload",
-        prefix="captured/",
-        resource_type="image",
-        max_results=30
-    )
-
-    if not resources["resources"]:
-        print("🚫 No image found in Cloudinary")
-        return None
-
-    latest = max(resources["resources"], key=lambda x: x["created_at"])
-    image_url = latest["secure_url"]
-    public_id = latest["public_id"]  # e.g., captured/image123
-
-    print(f"\n📷 Image URL: {image_url}")
-
-    # Download image from Cloudinary
-    response = requests.get(image_url)
-    if response.status_code != 200:
-        print(f"❌ Failed to fetch image: {response.status_code}")
-        return None
-
-    image = Image.open(BytesIO(response.content)).convert("RGB")
-
-    # Gemini prompt
     prompt = """
-    You are an expert in waste classification.
-    What is the primary recyclable material of this item?
-    Classify the object in the following image into one of these categories, and output in the format <Category> -> <Color>:
+    You are an expert in visual waste classification.
+
+    Your task is to analyze the **main object** in the image (the central and most prominent item), and classify its recyclable material type into **only one of** the following categories:
 
     - Glass -> Purple
-    - Paper/Cardboard -> Blue
+    - Paper or Cardboard -> Blue
     - General Trash -> Green
 
-    Return exactly one line in this format, nothing else.
-    """
+    Focus only on the **main object** in the image. Ignore any background, shadow, or irrelevant objects.
 
+    Do not guess. If you're not sure, or the object is not clearly recyclable, choose **General Trash**.
+
+    Output format: <Category> -> <Color>
+    Return **exactly one line** in that format. No explanation. No extra text.
+    """
+    
     model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
-    gemini_response = model.generate_content([prompt, image], generation_config={"temperature": 0.2})
-    raw = (gemini_response.text or "").strip()
+    response = model.generate_content([prompt, image], generation_config={"temperature": 0.2})
+    raw = (response.text or "").strip()
 
     print(f"🧠 AI response: '{raw}'")
 
     if "->" in raw:
-        category = raw.split("->")[0].strip()
+        category = raw.split("->")[0].strip().lower()
     else:
         category = "unknown"
 
     print(f"🧪 Parsed category: '{category}'")
-    set_led_color(category)
-
-    file_name = public_id.split("/")[-1]  # e.g., 'myphoto.png'
-
-    new_id = f"{category.lower()}/{file_name}"
-
-    cloudinary.uploader.rename(
-        from_public_id=public_id,
-        to_public_id=new_id,
-        overwrite=True,
-        type="upload"
-    )
-
-    print(f"📁 Image moved to Cloudinary folder: {category.lower()}")
     return category
 
-# ===================== Main =====================
+def upload_image(buffer, category):
+    """Upload image to Cloudinary under the category folder with unique filename"""
+    buffer.seek(0)  # 🔧 Reset buffer position before upload
+    folder = category.lower()
+
+    existing = cloudinary.api.resources(
+        type="upload",
+        prefix=f"{folder}/",
+        resource_type="image",
+        max_results=500
+    )
+    count = len(existing.get("resources", []))
+    filename = f"{category}_{count + 1}"
+
+    cloudinary.uploader.upload(buffer, folder=folder, public_id=f"{folder}/{filename}")
+    print(f"✅ Uploaded image as: {folder}/{filename}.png")
+
+
+def set_led_color(category):
+    """Turn on RGB LED based on predicted category"""
+    color = colors.get(category.lower().strip())
+    if color:
+        led.color = color
+        print(f"💡 LED ON: {category} → {color}")
+    else:
+        led.color = (1, 0, 0)  # Red for unknown category
+        print(f"⚠️ Unknown category → RED")
+    time.sleep(10)
+    led.off()
+
+# ========== Main Loop ==========
 
 def main():
     try:
         while True:
             print("\n🟢 Waiting for button press...")
             button.wait_for_press()
-            take_picture()
-            classify()
+
+            image_buffer = take_picture()
+            category = predict_category(image_buffer)
+            set_led_color(category)
+            upload_image(image_buffer, category)
+
     except KeyboardInterrupt:
         print("🛑 Stopped by user")
     finally:
