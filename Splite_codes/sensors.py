@@ -1,34 +1,45 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import RPi.GPIO as GPIO
 import time
 import math
 
-# GPIO base setup
+# ===================== GPIO setup =====================
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
-# Pins (defined and set up here)
-TRIG1, ECHO1 = 17, 27   # Glass
-TRIG2, ECHO2 = 22, 23   # General Trash
+# ===================== Pin definitions =====================
+TRIG1, ECHO1 = 17, 27   # Sensor 1 (Glass)
+TRIG2, ECHO2 = 22, 23   # Sensor 2 (General Trash)
+TRIG3, ECHO3 = 6,  5    # Sensor 3 (Paper/Cardboard)
 
+SENSORS = [
+    ("Glass",          TRIG1, ECHO1),
+    ("General Trash",  TRIG2, ECHO2),
+    ("Paper/Cardboard",TRIG3, ECHO3),
+]
+
+# ===================== Constants =====================
 user_max_distance_m = 6.0
-SPEED_OF_SOUND_M_S = 343.0
-SPEED_OF_SOUND_CM_S = SPEED_OF_SOUND_M_S * 100.0
+SPEED_OF_SOUND_CM_S = 34300.0
 TRIGGER_PULSE_US = 10
 SENSOR_MAX_CM_PRACTICAL = 400.0
 
-# GPIO setup for sensors
-GPIO.setup(TRIG1, GPIO.OUT); GPIO.output(TRIG1, False)
-GPIO.setup(ECHO1, GPIO.IN)
-GPIO.setup(TRIG2, GPIO.OUT); GPIO.output(TRIG2, False)
-GPIO.setup(ECHO2, GPIO.IN)
+# ===================== GPIO setup for each sensor =====================
+for _, trig, echo in SENSORS:
+    GPIO.setup(trig, GPIO.OUT)
+    GPIO.output(trig, False)
+    GPIO.setup(echo, GPIO.IN)
 
+# ===================== Functions =====================
 def timeout_for_max_distance(max_distance_m: float) -> float:
-    """Compute echo timeout based on desired max distance."""
-    t = (2.0 * max_distance_m) / SPEED_OF_SOUND_M_S
+    """Return timeout value for given max distance."""
+    t = (2.0 * max_distance_m) / (SPEED_OF_SOUND_CM_S / 100.0)
     return t * 1.25
 
 def _wait_for(echo_pin: int, level: int, timeout_s: float) -> bool:
-    """Wait for echo pin to reach the desired level or timeout."""
+    """Wait until echo pin reaches a level or timeout."""
     start = time.perf_counter()
     while GPIO.input(echo_pin) != level:
         if time.perf_counter() - start > timeout_s:
@@ -36,7 +47,7 @@ def _wait_for(echo_pin: int, level: int, timeout_s: float) -> bool:
     return True
 
 def measure_distance_cm(trig_pin: int, echo_pin: int, edge_timeout_s: float) -> float:
-    """Send trigger pulse and measure round-trip echo in cm."""
+    """Measure distance once and return value in cm (or NaN if failed)."""
     GPIO.output(trig_pin, False)
     time.sleep(0.0002)
     GPIO.output(trig_pin, True)
@@ -53,7 +64,7 @@ def measure_distance_cm(trig_pin: int, echo_pin: int, edge_timeout_s: float) -> 
     return (t_end - t_start) * SPEED_OF_SOUND_CM_S / 2.0
 
 def measure_with_retry(trig_pin: int, echo_pin: int, max_distance_m: float, retries: int = 1) -> float:
-    """Try multiple reads; return first non-NaN distance."""
+    """Try multiple times and return first valid distance (NaN if all fail)."""
     edge_timeout = timeout_for_max_distance(max_distance_m)
     for _ in range(retries + 1):
         d = measure_distance_cm(trig_pin, echo_pin, edge_timeout)
@@ -62,60 +73,35 @@ def measure_with_retry(trig_pin: int, echo_pin: int, max_distance_m: float, retr
     return math.nan
 
 def print_distance(label: str, d: float):
-    """Print distance with basic range checks."""
+    """Print distance result with basic range checks."""
     if math.isnan(d):
         print(f"{label}: Timeout")
     elif d > SENSOR_MAX_CM_PRACTICAL:
-        print(f"{label}: {d:.2f} cm (beyond HC-SR04 practical range)")
+        print(f"{label}: {d:.2f} cm (out of range)")
     elif d < 15.0:
-        print(f"{label}: {d:.2f} cm → LOW DISTANCE!")
+        print(f"{label}: {d:.2f} cm (too close)")
     else:
         print(f"{label}: {d:.2f} cm")
 
-def wait_until_clear(trig, echo, label, timeout=30, min_clear_cm=20.0):
-    """Measure once, print status, then silently wait until clear (>min_clear_cm) or timeout."""
-    start_t = time.time()
+def measure_dist(sensor_id: int) -> float:
+    """Measure one specific sensor by index (1,2,3)."""
+    if sensor_id == 1:
+        trig, echo, label = TRIG1, ECHO1, "Glass"
+    elif sensor_id == 2:
+        trig, echo, label = TRIG2, ECHO2, "General Trash"
+    elif sensor_id == 3:
+        trig, echo, label = TRIG3, ECHO3, "Paper/Cardboard"
+    else:
+        raise ValueError("sensor_id must be 1, 2, or 3")
 
-    # First measurement
     d = measure_with_retry(trig, echo, user_max_distance_m, retries=1)
-
-    # Print based on first measurement
-    if math.isnan(d):
-        print(f"{label}: Timeout (no valid reading)")
-    elif d < 15.0:
-        print(f"{label}: {d:.2f} cm → Bin is full, needs emptying")
-    elif d > min_clear_cm:
-        print(f"{label}: {d:.2f} cm → Bin is empty")
-        return d
-    else:
-        print(f"{label}: {d:.2f} cm → Still blocked")
-
-    # Silent loop until clear or timeout
-    while (math.isnan(d)) or (d <= min_clear_cm):
-        if time.time() - start_t > timeout:
-            break
-        time.sleep(0.5)
-        d = measure_with_retry(trig, echo, user_max_distance_m, retries=1)
-
-    # Final print after loop
-    if math.isnan(d):
-        print(f"{label}: Timeout (no valid reading after waiting)")
-    elif d > min_clear_cm:
-        print(f"{label}: {d:.2f} cm → Bin is now empty")
-    else:
-        print(f"{label}: {d:.2f} cm → Bin still blocked")
-
+    print_distance(label, d)
     return d
 
-
-def measure_dist(dist_sensor: int) -> float:
-    """Block until specific bin sensor is clear (>20cm) or timeout."""
-    if dist_sensor == 1:
-        trig, echo, label = TRIG1, ECHO1, "Glass"
-    elif dist_sensor == 2:
-        trig, echo, label = TRIG2, ECHO2, "General Trash"
-    else:
-        raise ValueError("dist_sensor must be 1 or 2")
-
-    return wait_until_clear(trig, echo, label)
-
+def measure_all_once(retries: int = 1):
+    """Measure all sensors once and return list of results."""
+    out = []
+    for (label, trig, echo) in SENSORS:
+        d = measure_with_retry(trig, echo, user_max_distance_m, retries=retries)
+        out.append((label, d))
+    return out
