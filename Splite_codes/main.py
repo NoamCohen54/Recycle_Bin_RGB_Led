@@ -1,3 +1,4 @@
+# ===================== Importing Libraries =====================
 import os
 import time
 import requests
@@ -12,19 +13,20 @@ import cloudinary.api
 import google.generativeai as genai
 import RPi.GPIO as GPIO
 
-# ========== Setup ==========
-
+# ===================== Setup =====================
 # Load .env file with API keys
 load_dotenv("API_KEY.env")
+
 cloudinary.config(
     cloud_name="dgyy6izrp",
     api_key=os.getenv("CLOUD_API_KEY"),
     api_secret=os.getenv("CLOUD_SECRET_KEY"),
     secure=True
 )
+
 genai.configure(api_key=os.getenv("Gemini_API_KEY"))
 
-# GPIO
+# GPIO setup
 button = Button(2)
 led = RGBLED(13, 19, 26, active_high=False)
 
@@ -35,56 +37,64 @@ colors = {
     "general trash": (0, 1, 0)    # Green
 }
 
-# ========== Functions ==========
+# ===================== Functions =====================
 
 def take_picture():
     """Capture image from Pi Camera and upload to Cloudinary."""
     print("📸 Starting camera...")
     picam2 = Picamera2()
-    picam2.start_preview(Preview.QT)
+    picam2.start_preview(Preview.QT)  # use Preview.NULL on headless systems
     picam2.start()
     time.sleep(5)
+
+    # Capture to buffer
     image_array = picam2.capture_array()
     image_pil = Image.fromarray(image_array)
     buffer = BytesIO()
     image_pil.convert("RGB").save(buffer, format="PNG")
     buffer.seek(0)
+
     picam2.stop_preview()
     picam2.close()
-    cloudinary.uploader.upload(buffer, folder="captuerd")
+
+    # ✅ תיקון: העלאה לתיקייה בשם הנכון "captured" (ולא captuerd)
+    cloudinary.uploader.upload(buffer, folder="captured")
+
     print("✅ Image captured and uploaded")
 
 def set_led_color(category):
     category = category.lower().strip()
-    
     color = colors.get(category)
     if color:
         led.color = color
     else:
-        led.color = (1, 0, 0)  # red for unknown
+        led.color = (1, 0, 0)  # RED for unknown
         print(f"⚠️ Unknown category → RED")
     time.sleep(10)
     led.off()
 
 def classify():
-    # Get latest image from Cloudinary
+    """Get latest uploaded image from 'captured', predict category, set LED, and move image to correct folder."""
+    
+    # ✅ תיקון: חיפוש בתיקייה הנכונה (captured)
     resources = cloudinary.api.resources(
         type="upload",
-        prefix="captuerd/",
+        prefix="captured/",
         resource_type="image",
         max_results=30
     )
+
     if not resources["resources"]:
         print("🚫 No image found in Cloudinary")
         return None
 
     latest = max(resources["resources"], key=lambda x: x["created_at"])
     image_url = latest["secure_url"]
-    public_id = latest["public_id"]
+    public_id = latest["public_id"]  # e.g., captured/image123
 
     print(f"\n📷 Image URL: {image_url}")
 
-    # Download image
+    # Download image from Cloudinary
     response = requests.get(image_url)
     if response.status_code != 200:
         print(f"❌ Failed to fetch image: {response.status_code}")
@@ -119,13 +129,21 @@ def classify():
     print(f"🧪 Parsed category: '{category}'")
     set_led_color(category)
 
-    # Move image to correct folder
-    cloudinary.api.update(public_id=public_id, folder=category.lower())
-    print(f"📁 Image moved to Cloudinary folder: {category.lower()}")
+    file_name = public_id.split("/")[-1]  # e.g., 'myphoto.png'
 
+    new_id = f"{category.lower()}/{file_name}"
+
+    cloudinary.uploader.rename(
+        from_public_id=public_id,
+        to_public_id=new_id,
+        overwrite=True,
+        type="upload"
+    )
+
+    print(f"📁 Image moved to Cloudinary folder: {category.lower()}")
     return category
 
-# ========== Main Loop ==========
+# ===================== Main =====================
 
 def main():
     try:
