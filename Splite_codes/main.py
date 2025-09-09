@@ -35,10 +35,7 @@ GPIO.setup(GREEN_PIN, GPIO.OUT)
 GPIO.setup(BLUE_PIN, GPIO.OUT)
 
 def set_rgb(r, g, b):
-    """
-    Drive the common-anode RGB LED.
-    Inputs are logical RGB (1=ON, 0=OFF); we invert to drive the pins.
-    """
+    """Drive the common-anode RGB LED (logical inputs inverted on pins)."""
     GPIO.output(RED_PIN,   not r)
     GPIO.output(GREEN_PIN, not g)
     GPIO.output(BLUE_PIN,  not b)
@@ -50,19 +47,19 @@ colors = {
 }
 
 # ===================== Distance Sensor Pins (not initialized here) =====================
-# We keep these for passing to the external sensor script only.
-TRIG1, ECHO1 = 17, 27   # Glass
-TRIG2, ECHO2 = 22, 23   # General Trash
-TRIG3, ECHO3 = 6,  5    # Paper/Cardboard
+# Names + pins are passed to the external process only.
+#TRIG1, ECHO1 = 17, 27   # Glass  -> Purple
+TRIG2, ECHO2 = 22, 23   # Trash  -> Green
+TRIG3, ECHO3 = 6,  5    # Paper  -> Blue
 
+# Choose the display names you want to see printed by the sensor script:
 SENSORS = [
-    ("Glass",          TRIG1, ECHO1),
-    ("General Trash",  TRIG2, ECHO2),
-    ("Paper/Cardboard",TRIG3, ECHO3),
+#    ("Purple bin", TRIG1, ECHO1),   # Glass
+    ("Green bin",  TRIG2, ECHO2),   # General Trash
+    ("Blue bin",   TRIG3, ECHO3),   # Paper/Cardboard
 ]
 
-# The following constants and functions are preserved from your original code
-# but are not used in this “separate process for sensors” approach.
+# kept for reference from original code
 user_max_distance_m = 6.0
 SPEED_OF_SOUND_CM_S = 34300.0
 TRIGGER_PULSE_US = 10
@@ -109,13 +106,13 @@ def measure_with_retry(trig_pin: int, echo_pin: int, max_distance_m: float, retr
 def print_distance(label: str, d: float):
     """Pretty-print distance results (kept for reference)."""
     if math.isnan(d):
-        print(f"{label}: Timeout")
+        print(f"\n\n{label}: Timeout")
     elif d > SENSOR_MAX_CM_PRACTICAL:
-        print(f"{label}: {d:.2f} cm (out of range)")
+        print(f"\n\n{label}: {d:.2f} cm (out of range)")
     elif d < 15.0:
-        print(f"{label}: {d:.2f} cm → Bin is full!")
+        print(f"\n\n{label}: {d:.2f} cm → Bin is full!")
     else:
-        print(f"{label}: {d:.2f} cm")
+        print(f"\n\n{label}: {d:.2f} cm")
 
 def wait_until_clear(trig: int, echo: int, label: str, timeout=30, min_clear_cm=20.0) -> float:
     """Placeholder to keep original structure; not used in this mode."""
@@ -127,10 +124,8 @@ def measure_dist(sensor_id: int) -> float:
 
 # ===================== Image + AI =====================
 def take_picture():
-    """
-    Capture an image with Picamera2 and return it as an in-memory PNG buffer.
-    """
-    print("📸 Starting camera...")
+    """Capture an image with Picamera2 and return it as an in-memory PNG buffer."""
+    print("\n\n📸 Starting camera...\n\n")
     picam2 = Picamera2()
     picam2.start_preview(Preview.QT)
     picam2.start()
@@ -146,10 +141,7 @@ def take_picture():
     return buffer
 
 def predict_category(image_buffer):
-    """
-    Send the image to Gemini with a strict prompt and parse a single-line category.
-    Falls back to 'unknown' if the output format is unexpected.
-    """
+    """Send the image to Gemini, parse a single-line category, or 'unknown'."""
     image = Image.open(image_buffer).convert("RGB")
     prompt = """
     You are an expert in visual waste classification.
@@ -171,20 +163,17 @@ def predict_category(image_buffer):
     response = model.generate_content([prompt, image], generation_config={"temperature": 0.2})
     raw = (response.text or "").strip()
 
-    print(f"🧠 AI response: '{raw}'")
+    print(f"\n\n🧠 AI Response: '{raw}'")
     if "->" in raw:
         category = raw.split("->")[0].strip().lower()
     else:
         category = "unknown"
 
-    print(f"🧪 Parsed category: '{category}'")
+    print(f"\n\n🧪 category: '{category}'")
     return category
 
 def upload_image(buffer, category):
-    """
-    Upload the image to Cloudinary under a folder named after the category.
-    The public_id is auto-incremented by counting current resources in the folder.
-    """
+    """Upload the image to Cloudinary under a folder named after the category."""
     buffer.seek(0)
     folder = category.lower()
     existing = cloudinary.api.resources(
@@ -196,30 +185,23 @@ def upload_image(buffer, category):
     count = len(existing.get("resources", []))
     filename = f"{category}_{count + 1}"
     cloudinary.uploader.upload(buffer, folder=folder, public_id=f"{folder}/{filename}")
-    print(f"✅ Uploaded image as: {folder}/{filename}.png")
+    print(f"\n\n✅ Uploaded image as: {folder}/{filename}.png")
 
 def set_led_color(category):
-    """
-    Map the predicted category to a fixed RGB color, show it for 10s, then turn off.
-    Unknown → red.
-    """
+    """Map category to a color, show for 10s, then turn off (unknown → red)."""
     color = colors.get(category.lower().strip())
     if color:
         set_rgb(*color)
-        print(f"💡 LED ON: {category} → {color}")
+        #print(f"💡 LED ON: {category} → {color}")
     else:
         set_rgb(1, 0, 0)
-        print(f"⚠️ Unknown category → RED")
+        print(f"\n\n⚠️ Unknown category → RED")
     time.sleep(10)
     set_rgb(0, 0, 0)
 
 # ===================== Main =====================
 def main():
-    """
-    Wait for a button press; when pressed, run the external sensor script
-    (which blocks quietly until all bins are clear) and only then proceed:
-    capture → classify → set LED → upload.
-    """
+    """Wait for button → run sensor script (blocking) → capture → classify → LED → upload."""
     try:
         while True:
             print("\n🟢 Waiting for button press...")
@@ -227,15 +209,14 @@ def main():
                 time.sleep(0.01)  # waiting for press
             time.sleep(0.3)  # debounce
 
-            # Block here until the external sensor script confirms "all clear".
-            args = ["python3", "sensors.py",
-                    str(TRIG1), str(ECHO1),
-                    str(TRIG2), str(ECHO2),
-                    str(TRIG3), str(ECHO3)]
-            print("🔎 Checking bins (quiet wait until clear)…")
+            # Pass (name, TRIG, ECHO) for each bin.
+            args = ["python3", "Sensors_Try.py"]
+            for name, trig, echo in SENSORS:
+                args += [name, str(trig), str(echo)]
+
             rc = subprocess.run(args, check=False).returncode
             if rc != 0:
-                print(f"⚠️ Sensors script exited with code {rc} — skipping cycle.")
+                print(f"\n⚠ Call IT️ there is a problem with the sensors:\n                   exited with code {rc} — skipping cycle.")
                 continue
 
             image_buffer = take_picture()
@@ -244,9 +225,9 @@ def main():
             upload_image(image_buffer, category)
 
     except KeyboardInterrupt:
-        print("🛑 Stopped by user")
+        print("\n\n🛑 Stopped by user")
+        GPIO.cleanup()
     finally:
-        # Only clean up pins owned by main (button + RGB).
         GPIO.cleanup()
 
 if __name__ == "__main__":
