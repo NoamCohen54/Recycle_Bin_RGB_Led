@@ -210,7 +210,7 @@ def main():
             time.sleep(0.3)  # debounce
 
             # Pass (name, TRIG, ECHO) for each bin.
-            args = ["python3", "Sensors_Try.py"]
+            args = ["python3", "sensors.py"]
             for name, trig, echo in SENSORS:
                 args += [name, str(trig), str(echo)]
 
