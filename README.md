@@ -22,7 +22,7 @@ A smart waste-sorting system powered by Raspberry Pi, combining:
 
 ## Introduction
 
-**Recycle_Bin_RGB_Led** is a Raspberry Pi–based system designed to enhance recycling using AI and sensors.  
+**Recycle Bin RGB Led** is a Raspberry Pi–based system designed to enhance recycling using AI and sensors.  
 When a user presses a physical button, the system:
 
 1. Verifies that the recycling bins are not full (via ultrasonic sensors)
